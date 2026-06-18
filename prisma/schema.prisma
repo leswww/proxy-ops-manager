@@ -1,0 +1,753 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProviderType {
+  VPS_PROVIDER
+  SOCKS5_PROVIDER
+  MIXED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum AssetStatus {
+  UNKNOWN
+  ONLINE
+  OFFLINE
+  DEGRADED
+  EXPIRED
+  SUSPENDED
+  IDLE
+  ASSIGNED
+}
+
+enum AssetType {
+  VPS
+  SOCKS5
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  ENDED
+  EXPIRED
+  SUSPENDED
+  CANCELLED
+  REPLACED
+}
+
+enum AllocationMode {
+  EXCLUSIVE
+  SHARED
+}
+
+enum RenewalType {
+  RESOURCE_RENEWAL
+  CUSTOMER_RENEWAL
+}
+
+enum RiskLevel {
+  UNKNOWN
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum MonitoringMode {
+  DISABLED
+  SSH_SYSTEM
+  THREE_X_UI
+  CUSTOM_AGENT
+}
+
+enum RelayMode {
+  DIRECT
+  VPS_RELAY
+  CHAIN_PROXY
+}
+
+enum RelayServiceType {
+  UNKNOWN
+  THREE_X_UI
+  GOST
+  SING_BOX
+  THREE_PROXY
+  XRAY
+  CUSTOM
+}
+
+enum TrafficSyncMode {
+  DISABLED
+  MANUAL
+  RELAY_NODE
+  PROVIDER_API
+}
+
+enum NetworkType {
+  UNKNOWN
+  DATACENTER
+  RESIDENTIAL
+  MOBILE
+  ISP
+  PROXY
+  VPN
+}
+
+enum HealthCheckType {
+  TCP
+  SOCKS5_AUTH
+  HTTP_OUTBOUND
+  DNS
+  UDP
+  PING
+  SSH
+  THREE_X_UI
+}
+
+enum HealthCheckStatus {
+  SUCCESS
+  FAILED
+  TIMEOUT
+  UNKNOWN
+}
+
+enum ReminderType {
+  VPS_EXPIRATION
+  SOCKS5_EXPIRATION
+  CUSTOMER_EXPIRATION
+  HEALTH_FAILURE
+  MANUAL
+}
+
+enum ReminderStatus {
+  PENDING
+  DONE
+  IGNORED
+}
+
+model Provider {
+  id            String       @id @default(cuid())
+  name          String
+  type          ProviderType
+  logoUrl       String?
+  website       String?
+  contactName   String?
+  contactMethod String?
+  billingUrl    String?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  vpsAssets    VpsAsset[]
+  socks5Assets Socks5Asset[]
+}
+
+model Customer {
+  id        String         @id @default(cuid())
+  name      String
+  contact   String?
+  platform  String?
+  status    CustomerStatus @default(ACTIVE)
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  vpsAssignments    VpsAsset[]    @relation("VpsCustomer")
+  socks5Assignments Socks5Asset[] @relation("Socks5Customer")
+  assignments       Assignment[]
+}
+
+model VpsAsset {
+  id                      String          @id @default(cuid())
+  name                    String
+  ip                      String
+  hostname                String?
+  sshPort                 Int             @default(22)
+  sshUsername             String?
+  encryptedSecret         String?
+  providerId              String?
+  country                 String?
+  city                    String?
+  asn                     String?
+  asOrganization          String?
+  isp                     String?
+  status                  AssetStatus     @default(UNKNOWN)
+  purchaseDate            DateTime?
+  activatedAt             DateTime?
+  serviceStartedAt        DateTime?
+  expireDate              DateTime?
+  costAmount              Decimal?        @db.Decimal(10, 2)
+  costCurrency            String?         @default("USD")
+  saleAmount              Decimal?        @db.Decimal(10, 2)
+  saleCurrency            String?         @default("CNY")
+  lastTrafficResetAt      DateTime?
+  hasThreeXui             Boolean         @default(false)
+  threeXuiEnabled         Boolean         @default(false)
+  threeXuiAutoSyncEnabled Boolean         @default(false)
+  threeXuiSyncIntervalMinutes Int         @default(5)
+  threeXuiUrl             String?
+  threeXuiPanelPort       Int?
+  threeXuiPanelPath       String?
+  threeXuiUsername        String?
+  threeXuiPasswordSecret  String?
+  threeXuiWebBasePath     String?
+  threeXuiPort            Int?
+  threeXuiSecretMasked    String?
+  threeXuiSyncXrayStatus  Boolean         @default(false)
+  threeXuiSyncUserTraffic Boolean         @default(false)
+  threeXuiLastSyncAt      DateTime?
+  threeXuiLastSyncStatus  String?
+  threeXuiLastSyncError   String?         @db.Text
+  threeXuiLastLatencyMs   Int?
+  threeXuiSessionValidUntil DateTime?
+  threeXuiDetectedApiPath String?
+  threeXuiDetectedLoginPath String?
+  threeXuiLastDiagnostics Json?
+  threeXuiPanelStatus     String?
+  xrayStatus              String?
+  panelCpuPercent         Float?
+  panelMemoryUsedMb       Float?
+  panelMemoryTotalMb      Float?
+  panelDiskUsedGb         Float?
+  panelDiskTotalGb        Float?
+  panelSwapUsedMb         Float?
+  panelSwapTotalMb        Float?
+  panelUptimeText         String?
+  panelSystemLoadText     String?
+  panelUploadSpeedText    String?
+  panelDownloadSpeedText  String?
+  panelTotalUploadGb      Float?
+  panelTotalDownloadGb    Float?
+  panelConnections        Int?
+  xrayVersion             String?
+  threeXuiVersion         String?
+  assignedCustomerId      String?
+  tags                    String?
+  notes                   String?
+  // 配置信息
+  osName                  String? // 操作系统名称
+  cpuCores                Int? // CPU 核心数
+  memoryMb                Int? // 内存 MB
+  diskGb                  Int? // 硬盘 GB
+  bandwidthMbps           Int? // 带宽 Mbps
+  // 流量信息
+  trafficTotalGb          Float? // 总流量 GB
+  trafficUsedGb           Float? // 已用流量 GB
+  trafficRemainingGb      Float? // 剩余流量 GB
+  trafficUpdatedAt        DateTime? // 流量更新时间
+  trafficSyncMode         TrafficSyncMode @default(DISABLED)
+  autoTrafficSyncEnabled  Boolean         @default(false)
+  autoTrafficSyncIntervalMinutes Int?
+  autoTrafficSyncLastRunAt DateTime?
+  autoTrafficSyncNextRunAt DateTime?
+  autoTrafficSyncStatus   String?
+  autoTrafficSyncError    String?         @db.Text
+  // 运行时间
+  lastStartedAt           DateTime? // 最近启动时间
+  lastRestartedAt         DateTime? // 最近重启时间
+  uptimeHours             Float? // 累计运行时长(小时)
+  // 监控
+  monitoringMode          MonitoringMode  @default(DISABLED)
+  // 分配模式
+  allocationMode          AllocationMode  @default(SHARED)
+  isDeleted               Boolean         @default(false)
+  deletedAt               DateTime?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  provider         Provider?               @relation(fields: [providerId], references: [id])
+  assignedCustomer Customer?               @relation("VpsCustomer", fields: [assignedCustomerId], references: [id])
+  assignments      Assignment[]
+  healthCheckLogs  HealthCheckLog[]
+  relaySocks5      Socks5Asset[]           @relation("RelayVps")
+  installTasks     InstallTask[]
+  metricSnapshots  RuntimeMetricSnapshot[]
+  renewalLogs      RenewalLog[]
+  trafficSyncLogs  TrafficSyncLog[]
+  threeXuiSyncLogs ThreeXuiSyncLog[]
+  threeXuiInboundSnapshots ThreeXuiInboundSnapshot[]
+  threeXuiClientSnapshots  ThreeXuiClientSnapshot[]
+  threeXuiOutboundSnapshots ThreeXuiOutboundSnapshot[]
+  threeXuiRoutingSnapshots  ThreeXuiRoutingSnapshot[]
+  threeXuiManualImportLogs ThreeXuiManualImportLog[]
+
+  @@index([providerId])
+  @@index([assignedCustomerId])
+  @@index([status])
+  @@index([isDeleted])
+}
+
+model Socks5Asset {
+  id                 String            @id @default(cuid())
+  name               String
+  host               String
+  port               Int
+  username           String?
+  encryptedSecret    String?
+  providerId         String?
+  country            String?
+  city               String?
+  asn                String?
+  asOrganization     String?
+  isp                String?
+  status             AssetStatus       @default(UNKNOWN)
+  purchaseDate       DateTime?
+  activatedAt        DateTime?
+  serviceStartedAt   DateTime?
+  expireDate         DateTime?
+  costAmount         Decimal?          @db.Decimal(10, 2)
+  costCurrency       String?           @default("USD")
+  saleAmount         Decimal?          @db.Decimal(10, 2)
+  saleCurrency       String?           @default("CNY")
+  lastTrafficResetAt DateTime?
+  supportsUdp        Boolean           @default(false)
+  relayVpsId         String?
+  assignedCustomerId String?
+  tags               String?
+  notes              String?
+  // 流量信息
+  trafficTotalGb     Float?
+  trafficUsedGb      Float?
+  trafficRemainingGb Float?
+  trafficUpdatedAt   DateTime?
+  autoTrafficSyncEnabled  Boolean         @default(false)
+  autoTrafficSyncIntervalMinutes Int?
+  autoTrafficSyncLastRunAt DateTime?
+  autoTrafficSyncNextRunAt DateTime?
+  autoTrafficSyncStatus   String?
+  autoTrafficSyncError    String?         @db.Text
+  // 配置信息
+  outboundIp         String? // 出口 IP
+  authType           String? // 认证方式
+  lastCheckedAt      DateTime?
+  lastMonitoringStatus String?
+  lastMonitoringError  String?           @db.Text
+  // 运行时间
+  lastStartedAt      DateTime? // 最近启动时间
+  uptimeHours        Float? // 累计运行时长(小时)
+  // 分配模式
+  allocationMode     AllocationMode    @default(EXCLUSIVE)
+  // 中转配置
+  usesRelayVps       Boolean           @default(false)
+  relayMode          RelayMode? // 直连 / VPS 中转 / 链式代理
+  relayServiceType   RelayServiceType? // gost / sing-box / 3proxy / xray / 自定义
+  relayListenHost    String? // 监听地址
+  relayListenPort    Int? // 监听端口
+  relayProtocol      String? // 中转协议
+  relayTag           String? // 中转标识/标签
+  relayThreeXuiInboundId     String?
+  relayThreeXuiInboundRemark String?
+  relayThreeXuiClientEmail   String?
+  relayThreeXuiClientId      String?
+  relayThreeXuiOutboundTag   String?
+  relayThreeXuiClientStatus  String?
+  relayThreeXuiClientExpiryAt DateTime?
+  trafficSyncMode    TrafficSyncMode   @default(DISABLED) // 流量同步模式
+  isDeleted          Boolean           @default(false)
+  deletedAt          DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  provider         Provider?               @relation(fields: [providerId], references: [id])
+  relayVps         VpsAsset?               @relation("RelayVps", fields: [relayVpsId], references: [id])
+  assignedCustomer Customer?               @relation("Socks5Customer", fields: [assignedCustomerId], references: [id])
+  assignments      Assignment[]
+  healthCheckLogs  HealthCheckLog[]
+  metricSnapshots  RuntimeMetricSnapshot[]
+  renewalLogs      RenewalLog[]
+  trafficSyncLogs  TrafficSyncLog[]
+
+  @@index([providerId])
+  @@index([relayVpsId])
+  @@index([assignedCustomerId])
+  @@index([status])
+  @@index([isDeleted])
+}
+
+model Assignment {
+  id                     String           @id @default(cuid())
+  customerId             String
+  assetType              AssetType
+  vpsAssetId             String?
+  socks5AssetId          String?
+  // 使用周期
+  usageStartDate         DateTime? // 原 startDate
+  customerExpireDate     DateTime? // 原 endDate — 客户服务到期时间
+  actualEndDate          DateTime? // 实际结束使用时间
+  status                 AssignmentStatus @default(ACTIVE)
+  notes                  String?
+  // 交付信息
+  deliveryMethod         String? // SSH / 3x-ui / SOCKS5 / LINK
+  deliveryHost           String?
+  deliveryPort           Int?
+  deliveryUsername       String?
+  deliveryPasswordMasked String?
+  deliveryLink           String?
+  // 服务计划
+  servicePlanName        String? // 例如 "基础版"、"高级版"
+  customerPriceAmount    Decimal?         @db.Decimal(10, 2)
+  customerPriceCurrency  String?          @default("USD")
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  vpsAsset    VpsAsset?    @relation(fields: [vpsAssetId], references: [id])
+  socks5Asset Socks5Asset? @relation(fields: [socks5AssetId], references: [id])
+  renewalLogs RenewalLog[]
+
+  @@index([customerId])
+  @@index([vpsAssetId])
+  @@index([socks5AssetId])
+  @@index([status])
+}
+
+model HealthCheckLog {
+  id            String            @id @default(cuid())
+  assetType     AssetType
+  vpsAssetId    String?
+  socks5AssetId String?
+  checkType     HealthCheckType
+  status        HealthCheckStatus
+  latencyMs     Int?
+  message       String?
+  checkedAt     DateTime          @default(now())
+
+  vpsAsset    VpsAsset?    @relation(fields: [vpsAssetId], references: [id])
+  socks5Asset Socks5Asset? @relation(fields: [socks5AssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([socks5AssetId])
+  @@index([checkedAt])
+}
+
+model IpIntelligence {
+  id                String      @id @default(cuid())
+  ip                String      @unique
+  country           String?
+  city              String?
+  asn               String?
+  asOrganization    String?
+  isp               String?
+  networkType       NetworkType @default(UNKNOWN)
+  isDatacenter      Boolean     @default(false)
+  isResidentialLike Boolean     @default(false)
+  isMobileLike      Boolean     @default(false)
+  isProxyLike       Boolean     @default(false)
+  isVpnLike         Boolean     @default(false)
+  internalRiskScore Int         @default(0)
+  riskLevel         RiskLevel   @default(UNKNOWN)
+  lastCheckedAt     DateTime?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}
+
+model Reminder {
+  id            String         @id @default(cuid())
+  title         String
+  assetType     AssetType?
+  vpsAssetId    String?
+  socks5AssetId String?
+  reminderType  ReminderType
+  dueAt         DateTime
+  status        ReminderStatus @default(PENDING)
+  message       String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String?
+  message    String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model LoginAuditLog {
+  id        String   @id @default(cuid())
+  username  String?
+  ip        String?
+  userAgent String?  @db.Text
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([username])
+  @@index([ip])
+  @@index([success])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InstallTask {
+  id             String    @id @default(cuid())
+  vpsAssetId     String
+  installType    String // THREE_X_UI / CUSTOM_SCRIPT
+  installUrl     String?
+  installCommand String?
+  status         String    @default("PENDING") // PENDING / RUNNING / SUCCESS / FAILED
+  outputLog      String?   @db.Text
+  parsedResult   Json? // 解析出的端口、账号、面板地址等
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  vpsAsset VpsAsset @relation(fields: [vpsAssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([status])
+}
+
+model RenewalLog {
+  id            String      @id @default(cuid())
+  renewalType   RenewalType @default(RESOURCE_RENEWAL)
+  assetType     AssetType? // 客户续期可能不关联资产类型
+  vpsAssetId    String?
+  socks5AssetId String?
+  assignmentId  String? // 客户续期关联使用记录
+  customerId    String? // 客户续期关联客户
+  oldExpireDate DateTime?
+  newExpireDate DateTime
+  addedDays     Int
+  addedLabel    String // 例如 "1个月"、"3个月"、"自定义45天"
+  note          String?
+  createdAt     DateTime    @default(now())
+
+  vpsAsset    VpsAsset?    @relation(fields: [vpsAssetId], references: [id])
+  socks5Asset Socks5Asset? @relation(fields: [socks5AssetId], references: [id])
+  assignment  Assignment?  @relation(fields: [assignmentId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([socks5AssetId])
+  @@index([assignmentId])
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model RuntimeMetricSnapshot {
+  id                   String    @id @default(cuid())
+  assetType            AssetType
+  vpsAssetId           String?
+  socks5AssetId        String?
+  provider             String? // SSH_SYSTEM / THREE_X_UI / RELAY_NODE / CUSTOM_AGENT
+  // CPU
+  cpuUsagePercent      Float?
+  cpuCores             Int?
+  // 内存
+  memoryUsedMb         Float?
+  memoryTotalMb        Float?
+  memoryUsagePercent   Float?
+  // 交换分区
+  swapUsedMb           Float?
+  swapTotalMb          Float?
+  swapUsagePercent     Float?
+  // 硬盘
+  diskUsedGb           Float?
+  diskTotalGb          Float?
+  diskUsagePercent     Float?
+  // 网络速度
+  uploadSpeedKbps      Float?
+  downloadSpeedKbps    Float?
+  // 流量
+  totalUploadGb        Float?
+  totalDownloadGb      Float?
+  // 连接数
+  tcpConnections       Int?
+  udpConnections       Int?
+  // 网络信息
+  publicIp             String?
+  privateIp            String?
+  // 系统信息
+  osName               String?
+  architecture         String?
+  systemUptimeSeconds  Float?
+  serviceUptimeSeconds Float?
+  loadAverage          String?
+  // 原始数据
+  rawData              Json?
+  collectedAt          DateTime  @default(now())
+  createdAt            DateTime  @default(now())
+
+  vpsAsset    VpsAsset?    @relation(fields: [vpsAssetId], references: [id])
+  socks5Asset Socks5Asset? @relation(fields: [socks5AssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([socks5AssetId])
+  @@index([collectedAt])
+}
+
+model TrafficSyncLog {
+  id            String          @id @default(cuid())
+  assetType     AssetType
+  vpsAssetId    String?
+  socks5AssetId String?
+  syncMode      TrafficSyncMode @default(MANUAL)
+  totalGb       Float?
+  usedGb        Float?
+  remainingGb   Float?
+  usagePercent  Float?
+  status        String          @default("SUCCESS")
+  message       String?
+  rawData       Json?
+  syncedAt      DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+
+  vpsAsset    VpsAsset?    @relation(fields: [vpsAssetId], references: [id])
+  socks5Asset Socks5Asset? @relation(fields: [socks5AssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([socks5AssetId])
+  @@index([syncedAt])
+  @@index([status])
+}
+
+model ThreeXuiSyncLog {
+  id             String   @id @default(cuid())
+  vpsAssetId     String
+  status         String
+  latencyMs      Int?
+  message        String?  @db.Text
+  inboundCount   Int?
+  clientCount    Int?
+  totalUploadGb  Float?
+  totalDownloadGb Float?
+  rawOverview    Json?
+  rawInbounds    Json?
+  syncedAt       DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  vpsAsset VpsAsset @relation(fields: [vpsAssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([status])
+  @@index([syncedAt])
+}
+
+model ThreeXuiInboundSnapshot {
+  id            String   @id @default(cuid())
+  vpsAssetId    String
+  inboundId     String
+  remark        String?
+  protocol      String?
+  port          Int?
+  enable        Boolean?
+  totalUploadGb Float?
+  totalDownloadGb Float?
+  rawData       Json?
+  syncedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  vpsAsset VpsAsset @relation(fields: [vpsAssetId], references: [id])
+  clients  ThreeXuiClientSnapshot[]
+
+  @@unique([vpsAssetId, inboundId])
+  @@index([vpsAssetId])
+  @@index([syncedAt])
+}
+
+model ThreeXuiClientSnapshot {
+  id                String   @id @default(cuid())
+  vpsAssetId        String
+  inboundSnapshotId String
+  inboundId         String
+  clientEmail       String?
+  clientId          String?
+  clientRemark      String?
+  enable            Boolean?
+  clientStatus      String?
+  totalUploadGb     Float?
+  totalDownloadGb   Float?
+  uploadBytes        Float?
+  downloadBytes      Float?
+  totalTrafficBytes  Float?
+  totalTrafficGb    Float?
+  expiryTime        DateTime?
+  rawData           Json?
+  syncedAt          DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  vpsAsset        VpsAsset @relation(fields: [vpsAssetId], references: [id])
+  inboundSnapshot ThreeXuiInboundSnapshot @relation(fields: [inboundSnapshotId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([inboundSnapshotId])
+  @@index([clientEmail])
+  @@index([syncedAt])
+}
+
+model ThreeXuiOutboundSnapshot {
+  id         String   @id @default(cuid())
+  vpsAssetId String
+  tag        String
+  protocol   String?
+  address    String?
+  port       Int?
+  rawData    Json?
+  syncedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  vpsAsset VpsAsset @relation(fields: [vpsAssetId], references: [id])
+
+  @@unique([vpsAssetId, tag])
+  @@index([vpsAssetId])
+  @@index([syncedAt])
+}
+
+model ThreeXuiRoutingSnapshot {
+  id          String   @id @default(cuid())
+  vpsAssetId  String
+  clientEmail String
+  outboundTag String
+  rawData     Json?
+  syncedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  vpsAsset VpsAsset @relation(fields: [vpsAssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([clientEmail])
+  @@index([outboundTag])
+  @@index([syncedAt])
+}
+
+model ThreeXuiManualImportLog {
+  id            String   @id @default(cuid())
+  vpsAssetId    String
+  importType    String
+  inboundCount  Int      @default(0)
+  clientCount   Int      @default(0)
+  outboundCount Int      @default(0)
+  routingCount  Int      @default(0)
+  status        String   @default("SUCCESS")
+  message       String?  @db.Text
+  createdAt     DateTime @default(now())
+
+  vpsAsset VpsAsset @relation(fields: [vpsAssetId], references: [id])
+
+  @@index([vpsAssetId])
+  @@index([importType])
+  @@index([createdAt])
+}

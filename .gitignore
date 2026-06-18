@@ -1,0 +1,58 @@
+# ---- Node ----
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Next.js ----
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# ---- TypeScript ----
+*.tsbuildinfo
+
+# ---- Tests / Coverage ----
+/coverage
+
+# ---- 环境变量 ----
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ---- 运维数据 ----
+logs
+*.log
+backups
+uploads
+data
+ecosystem.config.local.cjs
+
+# ---- 数据库 / 备份导出 ----
+*.sqlite
+*.db
+*.sql
+*.dump
+*.tar.gz
+*.zip
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+.idea
+.vscode
+*.pem
+.vercel
+
+# ---- Docker 本地 ----
+docker-compose.yml
+docker-compose.override.yml

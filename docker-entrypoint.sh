@@ -1,27 +1,29 @@
 #!/usr/bin/env sh
+# ProxyOps Manager Docker 入口脚本
 set -e
 
-CRED_FILE="/app/data/initial-credentials.txt"
-mkdir -p /app/data
+DATA_DIR="/app/data"
+CRED_FILE="$DATA_DIR/initial-credentials.txt"
+mkdir -p "$DATA_DIR"
 
-# 等待 MySQL 准备好
+# --- 等待数据库 + 应用迁移 ---
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "[entrypoint] 等待数据库可用..."
-  RETRY=0
+  i=0
   until npx --yes prisma migrate deploy >/dev/null 2>&1; do
-    RETRY=$((RETRY+1))
-    if [ "$RETRY" -ge 30 ]; then
-      echo "[entrypoint] 数据库连接超时，继续启动让应用自行报错。"
+    i=$((i + 1))
+    if [ "$i" -ge 60 ]; then
+      echo "[entrypoint] 数据库连接超时，继续启动 (应用会自行报错)"
       break
     fi
     sleep 2
   done
 fi
 
-# 首次启动且未提供 ADMIN_PASSWORD_HASH 时生成随机管理员密码
+# --- 首次启动：生成管理员临时密码 ---
 if [ -z "${ADMIN_PASSWORD_HASH:-}" ] && [ ! -f "$CRED_FILE" ]; then
-  TEMP_PASS="$(node -e "console.log(require('crypto').randomBytes(12).toString('base64').replace(/[^A-Za-z0-9]/g,'').slice(0,16))")"
-  HASH="$(node -e "console.log(require('bcryptjs').hashSync(process.argv[1],12))" "$TEMP_PASS")"
+  TEMP_PASS="$(node -e 'const c=require("crypto");process.stdout.write(c.randomBytes(24).toString("base64").replace(/[^A-Za-z0-9]/g,"").slice(0,16));')"
+  HASH="$(node -e 'console.log(require("bcryptjs").hashSync(process.argv[1],12))' "$TEMP_PASS")"
   export ADMIN_PASSWORD_HASH="$HASH"
   {
     echo "ProxyOps Manager 初始管理员凭据"

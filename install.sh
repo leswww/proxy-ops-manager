@@ -454,8 +454,29 @@ EOF
 
   # 容器状态展示（失败不影响后续成功页）
   $COMPOSE -f "$COMPOSE_FILE" ps 2>/dev/null || true
-  # 显式 return 0，防止函数末行残留的非零退出码影响主流程
-  return 0
+
+  # ---------------------------------------------------------------------------
+  # 直接在 Docker 分支内部打印成功页并退出，不依赖任何外部统一收尾逻辑。
+  # 任何 shell 错误处理都不应该再阻止接下来的纯文本输出。
+  # ---------------------------------------------------------------------------
+  trap - ERR EXIT INT TERM 2>/dev/null || true
+  set +e
+  set +u
+  set +o pipefail 2>/dev/null || true
+
+  # 在函数内部把所有展示用变量提前算好，print_success 内只做 echo
+  ACCESS_HOST="$(detect_server_ip 2>/dev/null || echo '服务器公网IP')"
+  ACCESS_URL="http://${ACCESS_HOST}:${APP_PORT}"
+  ADMIN_USERNAME_DISPLAY="admin"
+  if [ -n "${ADMIN_TEMP_PASS:-}" ]; then
+    ADMIN_PASSWORD_DISPLAY="$ADMIN_TEMP_PASS"
+  else
+    ADMIN_PASSWORD_DISPLAY="未读取到，请执行：cat ${CRED_FILE:-/opt/proxy-ops-manager/initial-credentials.txt}"
+  fi
+  INSTALL_MODE_LABEL="Docker Compose"
+
+  print_success
+  exit 0
 }
 
 ###############################################################################
@@ -490,11 +511,15 @@ detect_server_ip() {
 # 成功页：必定打印，不依赖任何外部命令的退出码
 ###############################################################################
 print_success() {
-  local server_ip access_url temp_pass cred_file
-  server_ip="$(detect_server_ip 2>/dev/null || echo '服务器公网IP')"
-  access_url="http://${server_ip}:${APP_PORT}"
-  temp_pass="${ADMIN_TEMP_PASS:-}"
-  cred_file="${CRED_FILE:-${APP_DIR:-/opt/proxy-ops-manager}/initial-credentials.txt}"
+  # 所有展示用变量必须在调用前由调用方准备好；本函数只做 echo，不调用任何外部命令。
+  # 如果调用方没准备好，这里只做 ${VAR:-默认值} 兜底，不报错也不依赖网络。
+  local access_url="${ACCESS_URL:-http://${ACCESS_HOST:-服务器公网IP}:${APP_PORT:-3010}}"
+  local username="${ADMIN_USERNAME_DISPLAY:-admin}"
+  local password="${ADMIN_PASSWORD_DISPLAY:-未读取到，请执行：cat ${CRED_FILE:-/opt/proxy-ops-manager/initial-credentials.txt}}"
+  local cred_file="${CRED_FILE:-${APP_DIR:-/opt/proxy-ops-manager}/initial-credentials.txt}"
+  local mode_label="${INSTALL_MODE_LABEL:-${FINAL_MODE:-unknown}}"
+  local app_dir="${APP_DIR:-/opt/proxy-ops-manager}"
+  local app_port="${APP_PORT:-3010}"
 
   echo
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -505,40 +530,30 @@ print_success() {
   echo "  ${access_url}"
   echo
   echo "管理员账号："
-  echo "  admin"
+  echo "  ${username}"
   echo
   echo "临时密码："
-  if [ -n "$temp_pass" ]; then
-    echo "  ${temp_pass}"
-  else
-    echo "  未读取到，请执行：cat ${cred_file}"
-  fi
+  echo "  ${password}"
   echo
   echo "凭据文件："
   echo "  ${cred_file}"
   echo
   echo "安装模式："
-  if [ "${FINAL_MODE:-}" = "docker" ]; then
-    echo "  Docker Compose"
-  elif [ "${FINAL_MODE:-}" = "native" ]; then
-    echo "  Native PM2"
-  else
-    echo "  ${FINAL_MODE:-unknown}"
-  fi
+  echo "  ${mode_label}"
   echo
   echo "常用命令："
-  if [ "${FINAL_MODE:-}" = "docker" ]; then
-    echo "  查看状态：cd ${APP_DIR} && docker compose ps"
-    echo "  查看日志：cd ${APP_DIR} && docker compose logs --tail=100 app"
-    echo "  重启服务：cd ${APP_DIR} && docker compose restart"
-    echo "  更新系统：cd ${APP_DIR} && bash update.sh"
-    echo "  备份数据：cd ${APP_DIR} && bash backup.sh"
-  else
+  if [ "${FINAL_MODE:-}" = "native" ]; then
     echo "  查看状态：pm2 status proxy-ops-manager"
     echo "  查看日志：pm2 logs proxy-ops-manager"
     echo "  重启服务：pm2 restart proxy-ops-manager --update-env"
-    echo "  更新系统：cd ${APP_DIR} && bash update.sh"
-    echo "  备份数据：cd ${APP_DIR} && bash backup.sh"
+    echo "  更新系统：cd ${app_dir} && bash update.sh"
+    echo "  备份数据：cd ${app_dir} && bash backup.sh"
+  else
+    echo "  查看状态：cd ${app_dir} && docker compose ps"
+    echo "  查看日志：cd ${app_dir} && docker compose logs --tail=100 app"
+    echo "  重启服务：cd ${app_dir} && docker compose restart"
+    echo "  更新系统：cd ${app_dir} && bash update.sh"
+    echo "  备份数据：cd ${app_dir} && bash backup.sh"
   fi
   echo
   echo "安全提醒："
@@ -547,7 +562,7 @@ print_success() {
   echo "  3. HTTP / IP 测试环境 COOKIE_SECURE=false（默认）"
   echo "  4. 正式 HTTPS 部署建议改为 COOKIE_SECURE=true"
   echo "  5. 生产环境建议配置域名、HTTPS、Nginx / Cloudflare / 防火墙"
-  echo "  6. 不建议长期直接暴露 ${APP_PORT} 端口"
+  echo "  6. 不建议长期直接暴露 ${app_port} 端口"
   echo
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
@@ -674,6 +689,19 @@ EOF
     echo "请首次登录后立即修改密码，然后删除本文件。"
   } > "$CRED_FILE"
   chmod 600 "$CRED_FILE"
+
+  # Native 模式也走 "内部直接打印 + exit" 路径，与 Docker 模式对齐
+  trap - ERR EXIT INT TERM 2>/dev/null || true
+  set +e
+  set +u
+  set +o pipefail 2>/dev/null || true
+  ACCESS_HOST="$(detect_server_ip 2>/dev/null || echo '服务器公网IP')"
+  ACCESS_URL="http://${ACCESS_HOST}:${APP_PORT}"
+  ADMIN_USERNAME_DISPLAY="admin"
+  ADMIN_PASSWORD_DISPLAY="${ADMIN_TEMP_PASS:-未读取到，请执行：cat ${CRED_FILE}}"
+  INSTALL_MODE_LABEL="Native PM2"
+  print_success
+  exit 0
 }
 
 ###############################################################################

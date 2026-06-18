@@ -131,11 +131,45 @@ pm2 save
 ## 默认账号策略
 
 - 默认用户名固定为 `admin`。
-- 不设默认密码。`install.sh` / Docker 入口在首次启动时生成 16 位随机临时密码，
-  写入安装目录的 `initial-credentials.txt`（权限 600）。
+- 不设默认密码。`install.sh` / Docker 入口在首次启动时生成 16 位随机临时密码：
+  - 安装完成页会**直接打印一次**到终端。
+  - 同时写入安装目录的 `initial-credentials.txt`（权限 600，宿主机也复制一份）。
+  - bcrypt hash 持久化到容器卷 `/app/data/admin-password.hash`，容器重启不会换密码。
+- 重新查看临时密码：
+  ```bash
+  # Docker
+  docker compose exec app cat /app/data/initial-credentials.txt
+  # 或宿主机同步副本
+  cat /opt/proxy-ops-manager/initial-credentials.txt
+  # Native
+  cat /opt/proxy-ops-manager/initial-credentials.txt
+  ```
 - **首次登录后必须立即修改密码**，然后删除 / 异地备份凭据文件。
 - 仅在 `USE_MOCK_DATA=true` 的本地演示模式下保留 `admin / admin123`，
   生产环境必须将 `USE_MOCK_DATA` 设置为 `false`。
+
+### Cookie 与 HTTPS
+
+登录使用 cookie 鉴权，是否带 `Secure` 标志由环境变量 `COOKIE_SECURE` 控制：
+
+| 部署场景 | `COOKIE_SECURE` | 说明 |
+| -------- | --------------- | ---- |
+| 用 IP + 端口的 HTTP 直连测试 | `false`（默认） | 不带 Secure，浏览器才会保存 cookie |
+| 部署 HTTPS / 域名 / Cloudflare 全代理 | `true` | 启用 Secure，仅在 HTTPS 下传输 cookie |
+
+修改方式：
+
+- Docker 模式：编辑 `docker-compose.yml` 中 `COOKIE_SECURE`，`docker compose up -d`。
+- Native 模式：编辑 `.env.production` 中 `COOKIE_SECURE`，`pm2 restart proxy-ops-manager --update-env`。
+
+### 数据库初始化
+
+- 首次启动时 `docker-entrypoint.sh` 会等待 MySQL 可用，并执行
+  `npx prisma migrate deploy`。
+- 若 `prisma/migrations` 暂时缺失（极少情况），会自动 fallback 到
+  `npx prisma db push` 把当前 `schema.prisma` 同步到数据库，避免 `RenewalLog`
+  等表未创建导致 dashboard 报错。
+- 仓库已经包含完整的 `prisma/migrations/0001_init/migration.sql`，覆盖全部模型。
 
 ---
 
@@ -269,6 +303,37 @@ APP_PORT=8443 bash install.sh    # 全新安装
 **Q7. 如何配置域名 / HTTPS？**
 推荐前置 Nginx + Let's Encrypt 或 Caddy 反向代理到 `127.0.0.1:APP_PORT`；
 或者放在 Cloudflare 全代理后只对 Cloudflare 网段开放端口。
+启用 HTTPS 后请把 `COOKIE_SECURE` 改为 `true` 并重启服务。
+
+**Q8. 登录接口返回 200 OK，但浏览器停在登录页 / 没有跳转？**
+公网 HTTP 环境下 cookie 带 `Secure` 标志，浏览器不会保存。请确认：
+- `docker-compose.yml` 或 `.env.production` 中 `COOKIE_SECURE="false"`。
+- 改后 `docker compose up -d` 或 `pm2 restart proxy-ops-manager --update-env`。
+- 部署 HTTPS 后再改回 `true`。
+
+**Q9. Dashboard 报错 `The table RenewalLog does not exist`？**
+说明 `prisma migrate deploy` 没找到迁移文件或迁移未应用：
+```bash
+# 仓库已包含 prisma/migrations/0001_init/migration.sql；如确有缺失：
+docker compose exec app npx prisma migrate deploy
+# 实在没 migration 时的兜底（开发环境）：
+docker compose exec app npx prisma db push
+```
+新版 `docker-entrypoint.sh` 已在缺 migration 时自动 fallback 到 `db push`，
+所以重新拉取 `main` 分支后再 `docker compose build` 即可解决。
+
+**Q10. Ubuntu 24.04 上 `docker-compose --version` 报 `ModuleNotFoundError: No module named 'distutils'`？**
+那是旧版 v1 `docker-compose` 不兼容 Python 3.12 的问题。请改用 v2：
+```bash
+sudo apt-get remove -y docker-compose
+sudo apt-get install -y docker-compose-plugin   # 或包含此插件的 docker-ce
+docker compose version
+```
+本仓库的 `install.sh` 与脚本都优先使用 `docker compose`（v2），不依赖 v1。
+
+**Q11. `docker compose` 启动时提示 `the attribute 'version' is obsolete`？**
+新版 `docker-compose.yml` 已经移除 `version` 字段。请重新 `git pull` 后再启动；
+旧版本可手动删除 `docker-compose.yml` 第一行。
 
 ---
 

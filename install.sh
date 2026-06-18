@@ -363,7 +363,6 @@ run_docker_mode() {
   local COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   cat > "$COMPOSE_FILE" <<EOF
 # 由 install.sh 自动生成，含敏感凭据；勿提交到任何仓库。
-version: "3.9"
 services:
   db:
     image: mysql:8.0
@@ -395,6 +394,7 @@ services:
       ADMIN_USERNAME: "admin"
       ADMIN_PASSWORD_HASH: ""
       SESSION_SECRET: "${SESSION_SECRET}"
+      COOKIE_SECURE: "false"
       USE_MOCK_DATA: "false"
       NEXT_PUBLIC_APP_NAME: "ProxyOps Manager"
       NEXT_PUBLIC_APP_DOMAIN: "your-domain.com"
@@ -419,16 +419,21 @@ EOF
   $COMPOSE -f "$COMPOSE_FILE" up -d
 
   LAST_STEP="等待 app 首次启动生成管理员凭据"
-  log "等待应用初始化 (最多 120 秒)..."
+  log "等待应用初始化 (最多 180 秒，含数据库迁移)..."
   local i=0 cred_inside="/app/data/initial-credentials.txt"
   ADMIN_TEMP_PASS=""
-  while [ "$i" -lt 60 ]; do
+  # 注意：set -e 下避免 [ ... ] && break，统一用 if 包住，防误触 ERR trap
+  while [ "$i" -lt 90 ]; do
     if $COMPOSE -f "$COMPOSE_FILE" exec -T app sh -c "test -f $cred_inside" >/dev/null 2>&1; then
-      ADMIN_TEMP_PASS="$($COMPOSE -f "$COMPOSE_FILE" exec -T app sh -c "grep '临时密码' $cred_inside | awk -F': ' '{print \$2}' | tr -d '\r'" 2>/dev/null || true)"
-      [ -n "$ADMIN_TEMP_PASS" ] && break
+      ADMIN_TEMP_PASS="$($COMPOSE -f "$COMPOSE_FILE" exec -T app sh -c "grep '临时密码' $cred_inside | awk -F': ' '{print \$2}' | tr -d '\r\n'" 2>/dev/null || true)"
+      if [ -n "$ADMIN_TEMP_PASS" ]; then
+        break
+      fi
     fi
-    sleep 2; i=$((i + 1))
+    sleep 2 || true
+    i=$((i + 1))
   done
+
   CRED_FILE="$APP_DIR/initial-credentials.txt"
   if [ -n "$ADMIN_TEMP_PASS" ]; then
     {
@@ -439,12 +444,17 @@ EOF
       echo "请首次登录后立即修改密码，然后删除本文件。"
     } > "$CRED_FILE"
     chmod 600 "$CRED_FILE"
+    ok "已读取初始管理员凭据并同步到 $CRED_FILE"
   else
-    warn "未能在 120s 内取到初始密码，可稍后执行： "
-    warn "  $COMPOSE -f $COMPOSE_FILE exec app cat /app/data/initial-credentials.txt"
+    warn "未能在 180 秒内读取初始凭据，但容器已启动。"
+    warn "  请稍后执行：$COMPOSE -f $COMPOSE_FILE exec app cat /app/data/initial-credentials.txt"
+    warn "  当前应用日志最后 30 行："
+    $COMPOSE -f "$COMPOSE_FILE" logs --tail=30 app 2>&1 || true
   fi
 
   $COMPOSE -f "$COMPOSE_FILE" ps || true
+  # 安装成功（包含未读到密码的情形），返回 0 让外层打印成功页
+  return 0
 }
 
 ###############################################################################
@@ -536,6 +546,7 @@ DATABASE_URL="mysql://$DB_USER:$DB_PASS@127.0.0.1:3306/$DB_NAME"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD_HASH='$ADMIN_PASSWORD_HASH'
 SESSION_SECRET="$SESSION_SECRET"
+COOKIE_SECURE="false"
 USE_MOCK_DATA="false"
 NEXT_PUBLIC_APP_NAME="ProxyOps Manager"
 NEXT_PUBLIC_APP_DOMAIN="your-domain.com"
@@ -579,6 +590,9 @@ case "$FINAL_MODE" in
 esac
 
 # --- 完成输出 ---
+# 解除 ERR trap：剩余只是文本输出，任何 awk/ip 命令的小问题都不应阻止打印成功页
+trap - ERR
+set +e
 LAST_STEP="生成结束页面"
 SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [ -z "$SERVER_IP" ] && SERVER_IP="$(ip route get 1 2>/dev/null | awk '{print $7; exit}')"
@@ -627,9 +641,11 @@ title "安全提醒"
 cat <<EOF
   1. 首次登录后请立即修改管理员密码
   2. 妥善保存或登录后删除凭据文件
-  3. 建议配置域名、HTTPS、Nginx / Cloudflare / 防火墙
-  4. 不建议把 ${APP_PORT} 端口长期暴露在公网
-  5. 请定期 bash backup.sh 备份数据库
+  3. HTTP / IP 测试环境 COOKIE_SECURE=false（默认）
+  4. 正式 HTTPS 部署建议改为 COOKIE_SECURE=true
+  5. 生产环境建议配置域名、HTTPS、Nginx / Cloudflare / 防火墙
+  6. 不建议把 ${APP_PORT} 端口长期暴露在公网
+  7. 请定期 bash backup.sh 备份数据库
 EOF
 echo
 title "下一步"

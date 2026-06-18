@@ -15,8 +15,6 @@
 #   docker compose exec app cat /app/data/initial-credentials.txt
 # =====================================================
 
-version: "3.9"
-
 services:
   db:
     image: mysql:8.0
@@ -49,6 +47,8 @@ services:
       # 留空 -> 首次启动自动生成随机密码 (见 /app/data/initial-credentials.txt)
       ADMIN_PASSWORD_HASH: ""
       SESSION_SECRET: "change_me_random_secret_at_least_32_chars"
+      # HTTP/IP 测试保持 "false"；HTTPS/域名生产改为 "true"
+      COOKIE_SECURE: "false"
       USE_MOCK_DATA: "false"
       NEXT_PUBLIC_APP_NAME: "ProxyOps Manager"
       NEXT_PUBLIC_APP_DOMAIN: "your-domain.com"

@@ -57,6 +57,10 @@ INSTALL_MODE=native curl -fsSL https://raw.githubusercontent.com/leswww/proxy-op
 | `REPO_URL` | `https://github.com/leswww/proxy-ops-manager.git` | 项目源 |
 | `FORCE` | 空 | 非空时覆盖已存在的非 git 安装目录 |
 | `ASSUME_YES` | curl\|bash 时默认 | 跳过 `[Y/n]` 确认 |
+| `PUBLIC_HOST` / `PUBLIC_IP` / `SERVER_IP` | 自动探测 | 显式指定成功页里的访问地址主机名/IP，例如绑定域名时 `PUBLIC_HOST=example.com` |
+
+> 安装完成页的访问地址优先使用 `PUBLIC_HOST` → `PUBLIC_IP` → `SERVER_IP` → 公网探测
+> (`api.ipify.org` / `ifconfig.me` / `icanhazip.com`) → 本机网卡 IP → 占位符。
 
 ### 安装模式
 

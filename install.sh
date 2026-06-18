@@ -452,9 +452,104 @@ EOF
     $COMPOSE -f "$COMPOSE_FILE" logs --tail=30 app 2>&1 || true
   fi
 
-  $COMPOSE -f "$COMPOSE_FILE" ps || true
-  # 安装成功（包含未读到密码的情形），返回 0 让外层打印成功页
+  # 容器状态展示（失败不影响后续成功页）
+  $COMPOSE -f "$COMPOSE_FILE" ps 2>/dev/null || true
+  # 显式 return 0，防止函数末行残留的非零退出码影响主流程
   return 0
+}
+
+###############################################################################
+# 公网/服务器 IP 检测：优先环境变量 → 公网探测 → 本机 → 占位符
+###############################################################################
+detect_server_ip() {
+  # 1) 显式环境变量
+  if [ -n "${PUBLIC_HOST:-}" ]; then printf '%s' "$PUBLIC_HOST"; return; fi
+  if [ -n "${PUBLIC_IP:-}" ];   then printf '%s' "$PUBLIC_IP";   return; fi
+  if [ -n "${SERVER_IP:-}" ];   then printf '%s' "$SERVER_IP";   return; fi
+
+  # 2) 公网探测 (3 个独立服务，单个 3 秒超时)
+  local ip=""
+  if command -v curl >/dev/null 2>&1; then
+    for url in https://api.ipify.org https://ifconfig.me https://icanhazip.com; do
+      ip="$(curl -fsS --max-time 3 "$url" 2>/dev/null | tr -d '\r\n[:space:]' || true)"
+      if [ -n "$ip" ]; then printf '%s' "$ip"; return; fi
+    done
+  fi
+
+  # 3) 本机网卡 IP
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  if [ -n "$ip" ]; then printf '%s' "$ip"; return; fi
+  ip="$(ip route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src"){print $(i+1); exit}}' || true)"
+  if [ -n "$ip" ]; then printf '%s' "$ip"; return; fi
+
+  # 4) 兜底
+  printf '%s' "服务器公网IP"
+}
+
+###############################################################################
+# 成功页：必定打印，不依赖任何外部命令的退出码
+###############################################################################
+print_success() {
+  local server_ip access_url temp_pass cred_file
+  server_ip="$(detect_server_ip 2>/dev/null || echo '服务器公网IP')"
+  access_url="http://${server_ip}:${APP_PORT}"
+  temp_pass="${ADMIN_TEMP_PASS:-}"
+  cred_file="${CRED_FILE:-${APP_DIR:-/opt/proxy-ops-manager}/initial-credentials.txt}"
+
+  echo
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " ProxyOps Manager 安装完成"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo
+  echo "访问地址："
+  echo "  ${access_url}"
+  echo
+  echo "管理员账号："
+  echo "  admin"
+  echo
+  echo "临时密码："
+  if [ -n "$temp_pass" ]; then
+    echo "  ${temp_pass}"
+  else
+    echo "  未读取到，请执行：cat ${cred_file}"
+  fi
+  echo
+  echo "凭据文件："
+  echo "  ${cred_file}"
+  echo
+  echo "安装模式："
+  if [ "${FINAL_MODE:-}" = "docker" ]; then
+    echo "  Docker Compose"
+  elif [ "${FINAL_MODE:-}" = "native" ]; then
+    echo "  Native PM2"
+  else
+    echo "  ${FINAL_MODE:-unknown}"
+  fi
+  echo
+  echo "常用命令："
+  if [ "${FINAL_MODE:-}" = "docker" ]; then
+    echo "  查看状态：cd ${APP_DIR} && docker compose ps"
+    echo "  查看日志：cd ${APP_DIR} && docker compose logs --tail=100 app"
+    echo "  重启服务：cd ${APP_DIR} && docker compose restart"
+    echo "  更新系统：cd ${APP_DIR} && bash update.sh"
+    echo "  备份数据：cd ${APP_DIR} && bash backup.sh"
+  else
+    echo "  查看状态：pm2 status proxy-ops-manager"
+    echo "  查看日志：pm2 logs proxy-ops-manager"
+    echo "  重启服务：pm2 restart proxy-ops-manager --update-env"
+    echo "  更新系统：cd ${APP_DIR} && bash update.sh"
+    echo "  备份数据：cd ${APP_DIR} && bash backup.sh"
+  fi
+  echo
+  echo "安全提醒："
+  echo "  1. 首次登录后请立即修改管理员密码"
+  echo "  2. 请删除或妥善保存凭据文件"
+  echo "  3. HTTP / IP 测试环境 COOKIE_SECURE=false（默认）"
+  echo "  4. 正式 HTTPS 部署建议改为 COOKIE_SECURE=true"
+  echo "  5. 生产环境建议配置域名、HTTPS、Nginx / Cloudflare / 防火墙"
+  echo "  6. 不建议长期直接暴露 ${APP_PORT} 端口"
+  echo
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
 ###############################################################################
@@ -584,76 +679,18 @@ EOF
 ###############################################################################
 # 执行
 ###############################################################################
+# 安装主流程：失败时由 ERR trap 处理；成功时永远继续到 print_success。
+# 用 || true 兜底，避免任一函数末尾的退出码意外让脚本提前结束。
 case "$FINAL_MODE" in
-  docker) run_docker_mode ;;
-  native) run_native_mode ;;
+  docker) run_docker_mode || true ;;
+  native) run_native_mode || true ;;
 esac
 
-# --- 完成输出 ---
-# 解除 ERR trap：剩余只是文本输出，任何 awk/ip 命令的小问题都不应阻止打印成功页
-trap - ERR
+# 进入成功页之前彻底解除所有 shell 错误处理，保证一定能打印
+trap - ERR EXIT INT TERM
 set +e
+set +u
+set +o pipefail 2>/dev/null || true
 LAST_STEP="生成结束页面"
-SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-[ -z "$SERVER_IP" ] && SERVER_IP="$(ip route get 1 2>/dev/null | awk '{print $7; exit}')"
-[ -z "$SERVER_IP" ] && SERVER_IP="<server-ip>"
-ACCESS_URL="http://${SERVER_IP}:${APP_PORT}"
 
-echo
-title "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-title " ProxyOps Manager 安装完成"
-title "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo
-printf '%s访问地址：%s %s\n'   "$C_CYAN" "$C_RESET" "$ACCESS_URL"
-printf '%s管理员账号：%s %s\n' "$C_CYAN" "$C_RESET" "admin"
-if [ -n "$ADMIN_TEMP_PASS" ]; then
-  printf '%s临时密码：%s   %s%s%s\n' "$C_CYAN" "$C_RESET" "$C_BOLD" "$ADMIN_TEMP_PASS" "$C_RESET"
-else
-  printf '%s临时密码：%s   (请查看凭据文件)\n' "$C_CYAN" "$C_RESET"
-fi
-printf '%s凭据文件：%s   %s\n'   "$C_CYAN" "$C_RESET" "${CRED_FILE:-未生成}"
-printf '%s安装模式：%s   %s\n'   "$C_CYAN" "$C_RESET" "$FINAL_MODE"
-printf '%s安装目录：%s   %s\n'   "$C_CYAN" "$C_RESET" "$APP_DIR"
-echo
-title "常用命令"
-if [ "$FINAL_MODE" = "docker" ]; then
-  COMPOSE_HINT="$(compose_cmd)"; [ -z "$COMPOSE_HINT" ] && COMPOSE_HINT="docker compose"
-  cat <<EOF
-  查看状态：cd $APP_DIR && $COMPOSE_HINT ps
-  查看日志：cd $APP_DIR && $COMPOSE_HINT logs -f app
-  重启服务：cd $APP_DIR && $COMPOSE_HINT restart app
-  更新系统：cd $APP_DIR && bash update.sh
-  备份数据：cd $APP_DIR && bash backup.sh
-  恢复数据：cd $APP_DIR && bash restore.sh backups/<时间戳>
-EOF
-else
-  cat <<EOF
-  查看状态：pm2 status proxy-ops-manager
-  查看日志：pm2 logs proxy-ops-manager
-  重启服务：pm2 restart proxy-ops-manager --update-env
-  更新系统：cd $APP_DIR && bash update.sh
-  备份数据：cd $APP_DIR && bash backup.sh
-  恢复数据：cd $APP_DIR && bash restore.sh backups/<时间戳>
-EOF
-fi
-echo
-title "安全提醒"
-cat <<EOF
-  1. 首次登录后请立即修改管理员密码
-  2. 妥善保存或登录后删除凭据文件
-  3. HTTP / IP 测试环境 COOKIE_SECURE=false（默认）
-  4. 正式 HTTPS 部署建议改为 COOKIE_SECURE=true
-  5. 生产环境建议配置域名、HTTPS、Nginx / Cloudflare / 防火墙
-  6. 不建议把 ${APP_PORT} 端口长期暴露在公网
-  7. 请定期 bash backup.sh 备份数据库
-EOF
-echo
-title "下一步"
-cat <<EOF
-  1. 浏览器打开 $ACCESS_URL
-  2. 用 admin / 临时密码 登录
-  3. 添加第一个 VPS / SOCKS5
-  4. 如使用 3x-ui，可从面板复制 inbound/client JSON 导入
-EOF
-echo
-title "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+print_success
